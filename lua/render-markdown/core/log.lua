@@ -66,6 +66,9 @@ end
 ---@param capture string
 ---@param node render.md.Node
 function M.node(capture, node)
+    if M.level('trace') < M.level(state.log_level) then
+        return
+    end
     M.add('trace', 'Node', {
         capture = capture,
         type = node.type,

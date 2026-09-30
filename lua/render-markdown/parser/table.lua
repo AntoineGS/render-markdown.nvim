@@ -90,6 +90,8 @@ function Parser:parse(root, marks)
                 log.unhandled(self.context.buf, 'markdown', 'row', node.type)
             end
         end
+    end, function(node)
+        return node:type() == types.delim or self.context.view:overlaps(node)
     end)
     if not delim or #row_nodes == 0 then
         return nil

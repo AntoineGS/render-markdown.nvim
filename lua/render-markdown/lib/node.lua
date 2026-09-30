@@ -21,7 +21,18 @@ local Position = {
 ---@field private node TSNode
 ---@field type string
 local Node = {}
-Node.__index = Node
+
+---@param self render.md.Node
+---@param key string
+---@return any
+function Node.__index(self, key)
+    if key == 'text' then
+        local text = vim.treesitter.get_node_text(self.node, self.buf)
+        rawset(self, key, text)
+        return text
+    end
+    return Node[key]
+end
 
 ---@param buf integer
 ---@param node TSNode
@@ -31,7 +42,6 @@ function Node.new(buf, node)
     self.buf = buf
     self.node = node
     self.type = node:type()
-    self.text = vim.treesitter.get_node_text(node, buf)
     local start_row, start_col, end_row, end_col = node:range()
     self.start_row = start_row
     self.start_col = start_col
@@ -194,9 +204,12 @@ function Node:scope()
 end
 
 ---@param callback fun(node: render.md.Node)
-function Node:for_each_child(callback)
+---@param filter? fun(node: TSNode): boolean
+function Node:for_each_child(callback, filter)
     for node in self.node:iter_children() do
-        callback(self:create(node))
+        if not filter or filter(node) then
+            callback(self:create(node))
+        end
     end
 end
 
