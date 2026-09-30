@@ -31,9 +31,13 @@ vim.cmd.runtime('plugin/render-markdown.lua')
 vim.opt.rtp:prepend(get_path({ 'plenary.nvim' }))
 vim.cmd.runtime('plugin/plenary.vim')
 
-require('nvim-treesitter')
-    .install({ 'html', 'latex', 'markdown', 'markdown_inline', 'yaml' })
-    :wait()
+-- Benchmarks can verify each stage against the installed parsers without
+-- downloading or changing the developer's Neovim dependencies.
+if vim.env.RM_TEST_OFFLINE ~= '1' then
+    require('nvim-treesitter')
+        .install({ 'html', 'latex', 'markdown', 'markdown_inline', 'yaml' })
+        :wait()
+end
 
 vim.api.nvim_create_autocmd('FileType', {
     group = vim.api.nvim_create_augroup('Highlighter', {}),
