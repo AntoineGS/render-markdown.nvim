@@ -29,15 +29,25 @@ function Render:setup()
         return false
     end
     local level, root = self.node:level_in('list')
-    ---@type render.md.bullet.Context
-    local ctx = {
-        level = level,
-        index = self.node:sibling_count('list_item'),
-        value = marker.text,
-    }
     local ordered_types = { 'list_marker_dot', 'list_marker_parenthesis' }
     local ordered = vim.tbl_contains(ordered_types, marker.type)
     local icons = ordered and self.config.ordered_icons or self.config.icons
+    local index = 1
+    if
+        Render.indexed(icons)
+        or Render.indexed(self.config.highlight)
+        or Render.indexed(self.config.scope_highlight)
+        or type(self.config.left_pad) == 'function'
+        or type(self.config.right_pad) == 'function'
+    then
+        index = self.node:sibling_count('list_item')
+    end
+    ---@type render.md.bullet.Context
+    local ctx = {
+        level = level,
+        index = index,
+        value = marker.text,
+    }
     self.data = {
         marker = marker,
         root = root,
@@ -48,6 +58,22 @@ function Render:setup()
         right_pad = Render.get_integer(self.config.right_pad, ctx),
     }
     return true
+end
+
+---@private
+---@param values render.md.bullet.String
+---@return boolean
+function Render.indexed(values)
+    if type(values) == 'function' then
+        return true
+    elseif type(values) == 'table' then
+        for _, value in ipairs(values) do
+            if type(value) == 'table' then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 ---@private
