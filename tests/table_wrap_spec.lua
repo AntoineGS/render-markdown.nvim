@@ -265,6 +265,54 @@ describe('table wrapping', function()
         })
     end)
 
+    it('quote with individually anchored nowrap rows', function()
+        vim.o.wrap = false
+        util.setup.text({
+            'BEFORE',
+            '',
+            '> | A | B |',
+            '> | - | - |',
+            '> | x | one two three four five six seven eight nine ten |',
+            '',
+            'AFTER',
+        }, { pipe_table = { cell = 'trimmed' } })
+        util.assert_screen({
+            'BEFORE',
+            '  ┌───┬────────────────────────────────┐',
+            '▋ │ A │ B                              │',
+            '▋ ├───┼────────────────────────────────┤',
+            '▋ │ x │ one two three four five six    │',
+            '▋ │   │ seven eight nine ten           │',
+            '  └───┴────────────────────────────────┘',
+            'AFTER',
+        })
+    end)
+
+    it('section indentation with individually anchored nowrap rows', function()
+        vim.o.wrap = false
+        util.setup.text({
+            '# Section',
+            '',
+            '| A | B |',
+            '| - | - |',
+            '| x | one two three four five six seven eight nine ten |',
+        }, {
+            pipe_table = { cell = 'padded' },
+            heading = { enabled = false },
+            indent = { enabled = true, skip_level = 0, per_level = 2 },
+        })
+        util.assert_screen({
+            '▎ # Section',
+            '▎',
+            '▎ ┌───┬────────────────────────────────┐',
+            '▎ │ A │ B                              │',
+            '▎ ├───┼────────────────────────────────┤',
+            '▎ │ x │ one two three four five six    │',
+            '▎ │   │ seven eight nine ten           │',
+            '▎ └───┴────────────────────────────────┘',
+        })
+    end)
+
     it('viewport-dependent widths', function()
         local input = { '', '| A | B |', '| - | - |' }
         for _ = 1, 100 do
