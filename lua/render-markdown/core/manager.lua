@@ -38,6 +38,18 @@ function M.init()
             end
         end,
     })
+    -- Toggling :wrap/:nowrap can invalidate the table replacement strategy.
+    vim.api.nvim_create_autocmd('OptionSet', {
+        group = M.group,
+        pattern = 'wrap',
+        callback = function(args)
+            -- OptionSet does not populate <abuf>.
+            local buf = env.buf.current()
+            if M.attached(buf) and state.get(buf).enabled then
+                ui.update(buf, env.buf.win(buf), args.event, false)
+            end
+        end,
+    })
 end
 
 ---@param buf integer
