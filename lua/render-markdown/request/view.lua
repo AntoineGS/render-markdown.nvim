@@ -6,6 +6,7 @@ local log = require('render-markdown.core.log')
 ---@class render.md.request.View
 ---@field private buf integer
 ---@field private ranges render.md.Range[]
+---@field native_wrap boolean
 local View = {}
 View.__index = View
 
@@ -14,6 +15,7 @@ View.__index = View
 function View.new(buf)
     local self = setmetatable({}, View)
     self.buf = buf
+    self.native_wrap = self:wraps()
     local ranges = {} ---@type render.md.Range[]
     for _, win in ipairs(env.buf.wins(buf)) do
         ranges[#ranges + 1] = env.range(buf, win, 10)
@@ -34,9 +36,23 @@ end
 ---@param win integer
 ---@return boolean
 function View:contains(win)
+    if self.native_wrap ~= self:wraps() then
+        return false
+    end
     local rows = env.range(self.buf, win, 0)
     for _, range in ipairs(self.ranges) do
         if interval.contains(range, rows) then
+            return true
+        end
+    end
+    return false
+end
+
+---@private
+---@return boolean
+function View:wraps()
+    for _, win in ipairs(env.buf.wins(self.buf)) do
+        if env.win.get(win, 'wrap') then
             return true
         end
     end

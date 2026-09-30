@@ -20,6 +20,18 @@ soon [ISSUE #14409](https://github.com/neovim/neovim/issues/14409).
 For tables `pipe_table.wrap = true` provides an alternative on Neovim 0.11+ by
 completely replacing the lines with virtual lines.
 
+### Line numbers on wrapped table rows
+
+Neovim does not draw line numbers, signs, or fold markers next to virtual lines.
+With `wrap` enabled, rows that need multiple lines are rendered entirely as virtual
+lines, so they appear without a line number. Rows that fit on a single line keep
+theirs, and the cursor row always shows its source line with its number.
+
+With `nowrap` the first line of each such row stays anchored to its source line and
+keeps its line number. Only the continuation lines are virtual. This is not possible
+with `wrap`, since concealing the source text does not reduce how many screen lines
+it takes up.
+
 ## `block` Width Removes Column Features
 
 [ISSUE #385](https://github.com/MeanderingProgrammer/render-markdown.nvim/issues/385)

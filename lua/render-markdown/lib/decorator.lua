@@ -63,9 +63,22 @@ end
 ---@param ns integer
 ---@param hide fun(extmark: render.md.Extmark): boolean
 function Decorator:display(ns, hide)
+    local replaced = {} ---@type table<integer, true>
+    for _, extmark in ipairs(self.marks) do
+        local mark = extmark:get()
+        if mark.replace and mark.opts.virt_text and not hide(extmark) then
+            replaced[mark.start_row] = true
+        end
+    end
     local visible = {} ---@type render.md.Mark[]
     for _, extmark in ipairs(self.marks) do
-        if hide(extmark) then
+        local mark = extmark:get()
+        -- The replacement already includes prefixes and cell decorations.
+        -- Suppress source decorations, but restore them on editable rows.
+        local source = replaced[mark.start_row]
+            and not mark.replace
+            and mark.opts.virt_text
+        if source or hide(extmark) then
             extmark:hide(ns, self.buf)
         else
             extmark:show(ns, self.buf)

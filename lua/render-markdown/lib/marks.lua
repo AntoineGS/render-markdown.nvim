@@ -77,15 +77,34 @@ end
 ---@param node render.md.Node
 ---@param lines render.md.mark.Line[]
 function Marks:replace(config, node, lines)
+    local continuation = {} ---@type render.md.mark.Line[]
+    for i = 2, #lines do
+        continuation[#continuation + 1] = lines[i]
+    end
+    ---@type render.md.mark.Opts
+    local opts = {
+        end_row = node.end_row,
+        end_col = node.end_col,
+    }
+    local col = node.start_col
+    if self.context.view.native_wrap then
+        -- Concealing text does not collapse Neovim's native soft-wrap height.
+        -- Keep the existing concealed-line strategy in soft-wrapped windows.
+        opts.conceal_lines = ''
+    else
+        -- Leave a real cursor anchor per source row. Grouping concealed rows
+        -- onto a later line makes native half-page movements skip whole tables.
+        col = 0
+        opts.conceal = ''
+        opts.virt_text = lines[1]
+        opts.virt_text_pos = 'overlay'
+        opts.virt_lines = continuation
+    end
     self:insert(config, {
         conceal = true,
         start_row = node.start_row,
-        start_col = node.start_col,
-        opts = {
-            end_row = node.end_row,
-            end_col = node.end_col,
-            conceal_lines = '',
-        },
+        start_col = col,
+        opts = opts,
         replace = lines,
     })
 end

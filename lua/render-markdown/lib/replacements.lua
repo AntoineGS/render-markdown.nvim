@@ -8,7 +8,7 @@ local M = {}
 function M.resolve(visible, line_count)
     local marks = {} ---@type render.md.Mark[]
     for _, mark in ipairs(visible) do
-        if mark.replace then
+        if mark.replace and not mark.opts.virt_text then
             marks[#marks + 1] = mark
         end
     end
