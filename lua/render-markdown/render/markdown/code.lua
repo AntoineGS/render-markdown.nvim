@@ -262,20 +262,20 @@ end
 function Render:padding(background)
     local col = self.node.start_col
     local start_row, end_row = self.node.start_row, self.node.end_row - 1
-    local empty = {} ---@type integer[]
+    local empty = {} ---@type table<integer, true>
     local widths = col == 0 and {} or self.node:widths()
     for i, width in ipairs(widths) do
         if width == 0 then
-            empty[#empty + 1] = (start_row + i - 1)
+            empty[start_row + i - 1] = true
         end
     end
-    if #empty == 0 and self.data.margin <= 0 and self.data.padding <= 0 then
+    if not next(empty) and self.data.margin <= 0 and self.data.padding <= 0 then
         return
     end
     local highlight = background and self.config.highlight or nil
     for row = start_row, end_row do
         local line = self:line()
-        if vim.tbl_contains(empty, row) then
+        if empty[row] then
             line:pad(col)
         end
         line:pad(self.data.margin)
