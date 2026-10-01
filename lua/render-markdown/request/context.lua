@@ -12,6 +12,7 @@ local str = require('render-markdown.lib.str')
 ---@field inline render.md.request.Inline
 ---@field latex render.md.request.Latex
 ---@field used render.md.request.Used
+---@field wrapped_tables render.md.Range[]
 local Context = {}
 Context.__index = Context
 
@@ -34,6 +35,7 @@ function Context.new(buf, win, config, view)
     self.inline = require('render-markdown.request.inline').new()
     self.latex = require('render-markdown.request.latex').new()
     self.used = require('render-markdown.request.used').new()
+    self.wrapped_tables = {}
     return self
 end
 

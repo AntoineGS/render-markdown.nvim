@@ -3,6 +3,7 @@ local compat = require('render-markdown.lib.compat')
 local env = require('render-markdown.lib.env')
 local iter = require('render-markdown.lib.iter')
 local log = require('render-markdown.core.log')
+local scrolloff = require('render-markdown.lib.scrolloff')
 local state = require('render-markdown.state')
 
 ---@class render.md.Ui
@@ -16,6 +17,7 @@ M.cache = {}
 
 ---called from state on setup
 function M.setup()
+    scrolloff.clear()
     -- clear marks and reset cache
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
         vim.api.nvim_buf_clear_namespace(buf, M.ns, 0, -1)
@@ -115,6 +117,7 @@ end
 
 ---@private
 function Updater:clear()
+    scrolloff.clear(self.buf)
     self.decorator:clear(M.ns)
     vim.api.nvim_buf_clear_namespace(self.buf, M.ns, 0, -1)
     state.on.clear({ buf = self.buf, win = self.win })
@@ -172,6 +175,15 @@ function Updater:display()
     self.decorator:display(M.ns, function(extmark)
         return self:hide(extmark, range)
     end)
+    local modes = env.mode.join(
+        self.config.render_modes,
+        self.config.pipe_table.render_modes
+    )
+    if env.mode.is(self.mode, modes) then
+        scrolloff.update(self.buf, Context.get(self.buf).wrapped_tables)
+    else
+        scrolloff.clear(self.buf)
+    end
     state.on.render({ buf = self.buf, win = self.win })
 end
 

@@ -26,6 +26,17 @@ describe('wrapped table navigation', function()
         util.set_row(50, true)
     end
 
+    it(
+        'does not skip concealed table rows on a half-page cursor movement',
+        function()
+            setup()
+            local before = vim.fn.line('.')
+            local scroll = vim.wo.scroll
+            vim.cmd('normal! \4zz')
+            assert.is_true(vim.fn.line('.') - before <= scroll)
+        end
+    )
+
     it('keeps every wrapped row as a separate cursor anchor', function()
         setup()
         local marks = vim.api.nvim_buf_get_extmarks(

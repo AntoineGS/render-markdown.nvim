@@ -20,6 +20,19 @@ soon [ISSUE #14409](https://github.com/neovim/neovim/issues/14409).
 For tables `pipe_table.wrap = true` provides an alternative on Neovim 0.11+ by
 completely replacing the lines with virtual lines.
 
+### Scrolling inside wrapped tables
+
+Neovim's half-page cursor movement does not count virtual continuation lines.
+While the cursor is inside a rendered wrapped table, the plugin temporarily
+raises the window-local `scrolloff` to at least half the window height. This keeps
+native `<C-u>` / `<C-d>` scrolling near half a rendered screen, including mappings
+that append `zz`. No key mappings are installed.
+
+This also keeps the cursor centered during `j` / `k` movement inside the table.
+The original local option (including global inheritance) is restored when leaving
+the table, buffer, or window, or when rendering is disabled. Explicit option
+changes made while inside the table are retained on exit.
+
 ## `block` Width Removes Column Features
 
 [ISSUE #385](https://github.com/MeanderingProgrammer/render-markdown.nvim/issues/385)

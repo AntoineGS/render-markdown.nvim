@@ -1,5 +1,6 @@
 local env = require('render-markdown.lib.env')
 local log = require('render-markdown.core.log')
+local scrolloff = require('render-markdown.lib.scrolloff')
 local state = require('render-markdown.state')
 local ui = require('render-markdown.core.ui')
 
@@ -47,6 +48,30 @@ function M.init()
             local buf = env.buf.current()
             if M.attached(buf) and state.get(buf).enabled then
                 ui.update(buf, env.buf.win(buf), args.event, false)
+            end
+        end,
+    })
+    vim.api.nvim_create_autocmd({ 'BufLeave', 'WinLeave' }, {
+        group = M.group,
+        callback = function(args)
+            if args.event == 'WinLeave' then
+                scrolloff.leave()
+            else
+                scrolloff.restore(env.win.current())
+            end
+        end,
+    })
+    vim.api.nvim_create_autocmd({ 'WinNew', 'WinEnter' }, {
+        group = M.group,
+        callback = function(args)
+            if args.event == 'WinNew' then
+                scrolloff.split()
+            else
+                scrolloff.enter()
+                local buf = env.buf.current()
+                if M.attached(buf) and state.get(buf).enabled then
+                    ui.update(buf, env.win.current(), args.event, false)
+                end
             end
         end,
     })
@@ -101,6 +126,7 @@ function M.attach(buf)
     state.attach()
 
     local events = {
+        'BufEnter',
         'BufWinEnter',
         'BufLeave',
         'CmdlineChanged',

@@ -56,9 +56,13 @@ end
 ---@return render.md.Range
 function M.range(buf, win, offset)
     local top = math.max(M.win.view(win).topline - 1 - offset, 0)
-    local bottom = top
+    -- Native wrapping, virtual lines and concealed rows all affect how many
+    -- source rows fit on screen. Window height is not a buffer-row budget.
+    local bottom = vim.api.nvim_win_call(win, function()
+        return vim.fn.line('w$')
+    end)
     local lines = vim.api.nvim_buf_line_count(buf)
-    local size = vim.api.nvim_win_get_height(win) + (2 * offset)
+    local size = offset
     while bottom < lines and size > 0 do
         bottom = bottom + 1
         if M.row.visible(win, bottom) then
@@ -226,6 +230,7 @@ end
 ---@return render.md.option.Value
 ---@overload fun(win: integer, name: 'conceallevel'): integer
 ---@overload fun(win: integer, name: 'diff'): boolean
+---@overload fun(win: integer, name: 'scrolloff'): integer
 ---@overload fun(win: integer, name: 'wrap'): boolean
 function M.win.get(win, name)
     return vim.api.nvim_get_option_value(name, { scope = 'local', win = win })

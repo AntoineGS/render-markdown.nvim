@@ -30,12 +30,19 @@ end
 function Render:run()
     self:delimiter()
     local wrapped = {} ---@type table<integer, render.md.mark.Line[]>
+    local multiline = false
     for i, row in ipairs(self.data.rows) do
         if self.data.layout.wrap and not self:row_fits(row) then
             wrapped[i] = self:wrapped_row(row)
+            multiline = multiline or #wrapped[i] > 1
         else
             self:row(row)
         end
+    end
+    if multiline then
+        local last = self.node.end_row - (self.node.end_col == 0 and 1 or 0)
+        local tables = self.context.wrapped_tables
+        tables[#tables + 1] = { self.node.start_row, last }
     end
     if self.config.border_enabled and self.data.layout.valid then
         self:border(wrapped)

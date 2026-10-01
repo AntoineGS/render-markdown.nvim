@@ -335,6 +335,10 @@ describe('table wrapping', function()
         util.assert_screen(expected)
 
         util.set_row(100, true)
+        -- Pin the viewport for the width snapshot: wrapped-table navigation
+        -- now keeps the cursor centered while it is inside the table.
+        vim.wo.scrolloff = 0
+        vim.cmd('normal! zt')
         util.assert_screen({
             '│ x │ y                                │',
             '│ x │ y                                │',
