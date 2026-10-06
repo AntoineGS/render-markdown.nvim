@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run repeatable Neovim performance benchmarks against generated Markdown."""
+"""Run repeatable Neovim performance benchmarks against committed Markdown."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CORPUS_DIR = ROOT / "benches" / "fixtures"
 STAGES = ("baseline", "step1", "step2", "step3", "step4")
 STAGE_DESCRIPTIONS = {
     "baseline": "Baseline implementation",
@@ -71,80 +72,34 @@ def parse_sizes(value: str) -> list[int]:
     return sizes
 
 
-def _fixture_content(kind: str, size: int) -> str:
-    if kind == "list":
-        lines: list[str] = []
-        for index in range(1, size + 1):
-            lines.extend((f"- Item {index}", "", f"  - Detail {index}"))
-        return "\n".join(lines) + "\n"
-
-    if kind == "nested_code":
-        lines = ["- Parent", "", "  - Nested", "", "    ```lua"]
-        for index in range(1, size + 1):
-            lines.append(f"    local value_{index} = {index}" if index % 2 else "")
-        lines.append("    ```")
-        return "\n".join(lines) + "\n"
-
-    if kind == "code":
-        lines = ["```lua"]
-        lines.extend(f"local value_{index} = {index}" for index in range(1, size + 1))
-        lines.append("```")
-        return "\n".join(lines) + "\n"
-
-    if kind == "table":
-        lines = ["| Name | Value |", "| --- | ---: |"]
-        lines.extend(f"| Row {index} | {index} |" for index in range(1, size + 1))
-        return "\n".join(lines) + "\n"
-
-    if kind == "section":
-        lines = ["## Section", ""]
-        for index in range(1, size + 1):
-            lines.append(f"    Indented body {index}")
-        return "\n".join(lines) + "\n"
-
-    raise ValueError(f"unknown corpus kind: {kind}")
-
-
-def _mixed_content(size: int) -> str:
-    count, remainder = divmod(size, len(KINDS))
-    lines = ["# Mixed corpus", ""]
-    for index, kind in enumerate(KINDS):
-        part_size = count + (1 if index < remainder else 0)
-        lines.extend((f"## {kind.replace('_', ' ').title()}", ""))
-        lines.extend(_fixture_content(kind, part_size).rstrip("\n").splitlines())
-        lines.append("")
-    return "\n".join(lines) + "\n"
-
-
 def _input_metadata(kind: str, size: int, name: str, content: bytes) -> dict[str, Any]:
+    lines = len(content.decode("utf-8").splitlines())
     return {
         "kind": kind,
         "size": size,
         "name": name,
-        "count": size,
+        "count": lines,
         "bytes": len(content),
-        "lines": len(content.decode("utf-8").splitlines()),
+        "lines": lines,
         "sha256": hashlib.sha256(content).hexdigest(),
     }
 
 
-def generate_corpus(corpus_dir: Path | str, sizes: list[int]) -> list[dict[str, Any]]:
-    """Write deterministic Markdown inputs without deleting unrelated files."""
+def load_corpus(corpus_dir: Path | str, sizes: list[int]) -> list[dict[str, Any]]:
+    """Read static inputs and fingerprint their actual bytes; never generate them."""
     directory = Path(corpus_dir)
-    directory.mkdir(parents=True, exist_ok=True)
     metadata: list[dict[str, Any]] = []
-
-    for size in sizes:
-        for kind in KINDS:
-            name = f"{kind}-{size}.md"
-            content = _fixture_content(kind, size).encode("utf-8")
-            (directory / name).write_bytes(content)
-            metadata.append(_input_metadata(kind, size, name, content))
-
-    mixed_name = f"mixed-{MIXED_SIZE}.md"
-    mixed = _mixed_content(MIXED_SIZE).encode("utf-8")
-    (directory / mixed_name).write_bytes(mixed)
-    metadata.append(_input_metadata("mixed", MIXED_SIZE, mixed_name, mixed))
+    cases = [(kind, size) for size in sizes for kind in KINDS]
+    cases.append(("mixed", MIXED_SIZE))
+    for kind, size in cases:
+        name = f"{kind}-{size}.md"
+        try:
+            content = (directory / name).read_bytes()
+        except OSError as error:
+            raise PerformanceError(f"fixture {name} is unavailable; select committed sizes with --sizes") from error
+        if not content.strip():
+            raise PerformanceError(f"fixture {name} is empty")
+        metadata.append(_input_metadata(kind, size, name, content))
     return metadata
 
 
@@ -262,7 +217,7 @@ def render_report(document: dict[str, Any], title: str = "Performance results") 
                 f"{marks.get('middle', '—')} | {marks.get('bottom', '—')} | {settings} |"
             )
     if any("mixed/1000" in stages[stage].get("benchmarks", {}) for stage in stage_names):
-        lines.extend(("", "Shareable generated input: [mixed Markdown document](corpus/mixed-1000.md)."))
+        lines.extend(("", "Inputs are committed under `benches/fixtures/`; no corpus copies are generated."))
 
     lines.extend(
         (
@@ -312,8 +267,8 @@ def _sha256_file(path: Path) -> str:
 def source_fingerprint(root: Path = ROOT) -> str:
     """Hash sorted Lua source paths and bytes, independent of the Git diff."""
     digest = hashlib.sha256()
-    lua_root = root / "lua"
-    for path in sorted(lua_root.rglob("*.lua"), key=lambda item: item.relative_to(root).as_posix()):
+    sources = [path for directory in ("lua", "plugin") for path in (root / directory).rglob("*.lua")]
+    for path in sorted(sources, key=lambda item: item.relative_to(root).as_posix()):
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -535,8 +490,8 @@ def _personal_input_metadata(path: Path) -> dict[str, Any]:
 
 def _protect_personal_input(value: str | None, output_dir: Path, private_dir: Path, sizes: list[int]) -> Path | None:
     """Reject source/output aliases before creating or overwriting any files."""
-    if private_dir == output_dir or private_dir.is_relative_to(output_dir):
-        raise PerformanceError("private outputs must be outside the shareable output directory")
+    if private_dir.is_relative_to(output_dir) or output_dir.is_relative_to(private_dir):
+        raise PerformanceError("private and shareable output directories must be disjoint")
     if value is None:
         return None
     try:
@@ -545,10 +500,9 @@ def _protect_personal_input(value: str | None, output_dir: Path, private_dir: Pa
             raise PerformanceError("personal input must be a readable file")
     except (OSError, RuntimeError) as error:
         raise PerformanceError("personal input must be a readable file") from error
-    targets = [private_dir / "corpus" / f"{kind}-{size}.md" for size in sizes for kind in KINDS]
+    targets = [CORPUS_DIR / f"{kind}-{size}.md" for size in sizes for kind in KINDS]
     targets.extend((
-        private_dir / "corpus" / f"mixed-{MIXED_SIZE}.md",
-        output_dir / "corpus" / f"mixed-{MIXED_SIZE}.md",
+        CORPUS_DIR / f"mixed-{MIXED_SIZE}.md",
         output_dir / "PERFORMANCE.md",
         output_dir / "performance.json",
         output_dir / "performance.json.tmp",
@@ -558,7 +512,7 @@ def _protect_personal_input(value: str | None, output_dir: Path, private_dir: Pa
     ))
     for target in targets:
         if source == target.resolve() or (target.exists() and source.samefile(target)):
-            raise PerformanceError("personal input collides with a generated input or output file")
+            raise PerformanceError("personal input collides with a benchmark input or output file")
     if source.is_relative_to(output_dir):
         raise PerformanceError("personal input must be outside the shareable output directory")
     return source
@@ -569,38 +523,38 @@ def _make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stage", choices=STAGES, help="implementation stage to record")
     parser.add_argument("--samples", type=positive_int, default=15, help="warm samples per operation (default: 15)")
     parser.add_argument("--cold-runs", type=positive_int, default=3, help="fresh Neovim processes (default: 3)")
-    parser.add_argument("--sizes", type=parse_sizes, default=parse_sizes("100,1000,5000"), help="comma-separated fixture sizes")
+    parser.add_argument("--sizes", type=parse_sizes, default=parse_sizes("100,1000,5000"), help="comma-separated committed fixture sizes (100,1000,5000)")
     parser.add_argument("--personal-file", help="optional private Markdown input (never written to public results)")
     parser.add_argument("--output-dir", default="benches/results", help="directory for public JSON and report")
-    parser.add_argument("--private-dir", default="temp/benchmarks", help="directory for generated corpus and private results")
+    parser.add_argument("--private-dir", default="temp/benchmarks", help="directory for worker scratch files and private results")
     parser.add_argument("--nvim", default="nvim", help="Neovim executable (default: nvim)")
     parser.add_argument("--replace-stage", action="store_true", help="replace a stage already present in the output")
-    parser.add_argument("--generate-only", action="store_true", help="generate the public corpus without running Neovim")
+    parser.add_argument("--list-inputs", action="store_true", help="list committed input metadata as JSON without running Neovim")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _make_parser()
     args = parser.parse_args(argv)
-    if not args.generate_only and args.stage is None:
-        parser.error("--stage is required unless --generate-only is used")
+    if not args.list_inputs and args.stage is None:
+        parser.error("--stage is required unless --list-inputs is used")
 
     root = ROOT
     output_dir = _relative_to_root(args.output_dir, root).resolve()
     private_dir = _relative_to_root(args.private_dir, root).resolve()
-    corpus_dir = private_dir / "corpus"
+    corpus_dir = CORPUS_DIR.resolve()
     try:
-        # Do this before corpus generation or result preparation. Taking a hash
-        # after generating an aliased fixture would already be too late.
+        for directory in (output_dir, private_dir):
+            if directory.is_relative_to(corpus_dir) or corpus_dir.is_relative_to(directory):
+                raise PerformanceError("output directories must not overlap the committed fixtures")
         _protect_personal_input(args.personal_file, output_dir, private_dir, args.sizes)
+        corpus_metadata = load_corpus(corpus_dir, args.sizes)
+        if args.list_inputs:
+            print(json.dumps(corpus_metadata, indent=2))
+            return 0
         private_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         if os.name == "posix":
             private_dir.chmod(0o700)
-        corpus_metadata = generate_corpus(corpus_dir, args.sizes)
-        if args.generate_only:
-            print(f"Generated {len(corpus_metadata)} deterministic Markdown inputs.")
-            return 0
-
         public_path = output_dir / "performance.json"
         public_document = _read_results(public_path)
         private_path = private_dir / "personal.json"
@@ -743,7 +697,7 @@ def main(argv: list[str] | None = None) -> int:
             private_document["stages"][args.stage] = private_stage
 
         if worker_environment is None:
-            raise PerformanceError("no benchmark inputs were generated")
+            raise PerformanceError("no benchmark inputs were loaded")
         public_environment = {
             **host,
             **worker_environment,
@@ -762,6 +716,8 @@ def main(argv: list[str] | None = None) -> int:
             raise PerformanceError("Lua source changed during the benchmark; no results were saved")
         if harness_fingerprint(root) != harness:
             raise PerformanceError("measurement harness changed during the benchmark; no results were saved")
+        if load_corpus(corpus_dir, args.sizes) != corpus_metadata:
+            raise PerformanceError("fixtures changed during the benchmark; no results were saved")
         public_document["schema_version"] = SCHEMA_VERSION
         if args.replace_stage:
             public_document["stages"].pop(args.stage, None)
@@ -769,13 +725,6 @@ def main(argv: list[str] | None = None) -> int:
         public_document = _redact_home(public_document)
         _write_results(public_path, public_document)
         (output_dir / "PERFORMANCE.md").write_text(render_report(public_document), encoding="utf-8")
-        # Only this deterministic synthetic input is published. Never copy the
-        # personal file, private metadata, or private timings into this directory.
-        shared_corpus = output_dir / "corpus"
-        shared_corpus.mkdir(exist_ok=True)
-        mixed_name = f"mixed-{MIXED_SIZE}.md"
-        (shared_corpus / mixed_name).write_bytes((corpus_dir / mixed_name).read_bytes())
-
         if private_document is not None:
             private_document["schema_version"] = SCHEMA_VERSION
             _write_results(private_path, private_document, private=True)

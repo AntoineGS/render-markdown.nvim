@@ -19,9 +19,8 @@ check:
 test:
   just busted "tests"
 
-bench:
-  python scripts/generate.py
-  just busted "benches"
+bench stage="baseline":
+  python scripts/performance.py --stage {{quote(stage)}}
 
 [private]
 busted path:

@@ -27,16 +27,18 @@ OPERATIONS = (
 
 
 class CorpusTests(unittest.TestCase):
-    def test_corpus_generation_is_deterministic_and_preserves_unrelated_files(self):
+    def test_static_corpus_is_loaded_without_writing_or_copying_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             corpus = Path(temporary) / "corpus"
             corpus.mkdir()
             unrelated = corpus / "keep.md"
             unrelated.write_text("do not remove\n", encoding="utf-8")
-
-            first = performance.generate_corpus(corpus, [2])
+            for kind in (*performance.KINDS, "mixed"):
+                size = 1000 if kind == "mixed" else 100
+                (corpus / f"{kind}-{size}.md").write_text("# Example\n\nActual content.\n", encoding="utf-8")
             first_bytes = {path.name: path.read_bytes() for path in corpus.glob("*.md")}
-            second = performance.generate_corpus(corpus, [2])
+            first = performance.load_corpus(corpus, [100])
+            second = performance.load_corpus(corpus, [100])
 
             self.assertEqual(first_bytes, {path.name: path.read_bytes() for path in corpus.glob("*.md")})
             self.assertEqual(unrelated.read_text(encoding="utf-8"), "do not remove\n")
@@ -47,31 +49,35 @@ class CorpusTests(unittest.TestCase):
                 self.assertEqual(item["bytes"], len(content))
                 self.assertEqual(item["lines"], len(content.decode("utf-8").splitlines()))
                 self.assertEqual(item["sha256"], hashlib.sha256(content).hexdigest())
-                self.assertEqual(item["count"], item["size"])
+                self.assertEqual(item["count"], 3)
 
-    def test_generated_corpus_contains_expected_markdown_shapes(self):
+    def test_missing_fixture_is_reported_without_generating_a_replacement(self):
         with tempfile.TemporaryDirectory() as temporary:
             corpus = Path(temporary)
-            items = performance.generate_corpus(corpus, [3])
-            by_kind = {item["kind"]: (corpus / item["name"]).read_text(encoding="utf-8") for item in items}
+            with self.assertRaisesRegex(performance.PerformanceError, "fixture"):
+                performance.load_corpus(corpus, [100])
+            self.assertEqual(list(corpus.iterdir()), [])
 
-            self.assertIn("- Item 1", by_kind["list"])
-            self.assertIn("```lua", by_kind["nested_code"])
-            self.assertIn("  - Nested", by_kind["nested_code"])
-            self.assertIn("```lua", by_kind["code"])
-            self.assertIn("| Row 1 |", by_kind["table"])
-            self.assertIn("    Indented body", by_kind["section"])
-            self.assertIn("# Mixed corpus", by_kind["mixed"])
-
-    def test_stress_fixtures_have_one_long_blank_heavy_block_and_one_long_section(self):
+    def test_empty_fixture_is_rejected_before_neovim_is_started(self):
         with tempfile.TemporaryDirectory() as temporary:
             corpus = Path(temporary)
-            performance.generate_corpus(corpus, [10])
-            nested = (corpus / "nested_code-10.md").read_text(encoding="utf-8")
-            section = (corpus / "section-10.md").read_text(encoding="utf-8")
-            self.assertEqual(nested.count("```"), 2)
-            self.assertIn("\n\n", nested.split("```lua", 1)[1].split("```", 1)[0])
-            self.assertEqual(section.count("## Section"), 1)
+            (corpus / "list-100.md").write_bytes(b"")
+            with self.assertRaisesRegex(performance.PerformanceError, "empty"):
+                performance.load_corpus(corpus, [100])
+
+
+class FingerprintTests(unittest.TestCase):
+    def test_changes_to_the_loaded_plugin_entrypoint_change_the_fingerprint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "lua").mkdir()
+            (root / "plugin").mkdir()
+            (root / "lua" / "module.lua").write_text("return {}\n", encoding="utf-8")
+            entrypoint = root / "plugin" / "entrypoint.lua"
+            entrypoint.write_text("require('module')\n", encoding="utf-8")
+            before = performance.source_fingerprint(root)
+            entrypoint.write_text("require('module').setup()\n", encoding="utf-8")
+            self.assertNotEqual(before, performance.source_fingerprint(root))
 
 
 class StatisticsTests(unittest.TestCase):
@@ -144,7 +150,7 @@ class CliTests(unittest.TestCase):
             "--cold-runs",
             "2",
             "--sizes",
-            "1",
+            "100",
             "--nvim",
             str(self.fake_nvim),
             "--output-dir",
@@ -179,9 +185,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(len(calls), 14)  # six synthetic fixtures and one personal file, each cold-run twice
         self.assertTrue(all(call["argv"] == ["--clean", "--headless", "-l", "benches/performance.lua"] for call in calls))
         self.assertEqual(len(synthetic_stage["benchmarks"]), 6)
-        self.assertEqual(len(synthetic_stage["benchmarks"]["list/1"]["initial_ms"]), 2)
-        self.assertEqual(synthetic_stage["benchmarks"]["list/1"]["initial_ms"], [1.25, 2.5])
-        self.assertEqual(synthetic_stage["benchmarks"]["list/1"]["samples"]["refresh_top"], [1.0, 2.0])
+        self.assertEqual(len(synthetic_stage["benchmarks"]["list/100"]["initial_ms"]), 2)
+        self.assertEqual(synthetic_stage["benchmarks"]["list/100"]["initial_ms"], [1.25, 2.5])
+        self.assertEqual(synthetic_stage["benchmarks"]["list/100"]["samples"]["refresh_top"], [1.0, 2.0])
         self.assertNotIn("personal", public_json.lower())
         self.assertNotIn(str(personal), public_json)
         self.assertNotIn(personal.read_text(encoding="utf-8").strip(), public_json)
@@ -189,10 +195,11 @@ class CliTests(unittest.TestCase):
         self.assertNotIn(personal.read_text(encoding="utf-8").strip(), private_json + private_report)
         self.assertEqual(list(personal_stage["benchmarks"]), ["personal"])
         self.assertEqual(personal_stage["benchmarks"]["personal"]["input"]["sha256"], original_hash)
-        self.assertTrue((self.public_dir / "corpus" / "mixed-1000.md").is_file())
+        self.assertFalse((self.public_dir / "corpus").exists())
+        self.assertFalse((self.private_dir / "corpus").exists())
         self.assertEqual(
-            (self.public_dir / "corpus" / "mixed-1000.md").read_bytes(),
-            (self.private_dir / "corpus" / "mixed-1000.md").read_bytes(),
+            {Path(call["input"]).parent for call in calls if call["kind"] != "personal"},
+            {ROOT / "benches" / "fixtures"},
         )
 
     def test_cli_rejects_duplicate_stage_without_replacement(self):
@@ -203,14 +210,14 @@ class CliTests(unittest.TestCase):
         self.assertNotEqual(second.returncode, 0)
         self.assertIn("already recorded", second.stderr)
 
-    def test_generate_only_recreates_corpus_without_starting_neovim(self):
+    def test_list_inputs_reports_static_metadata_without_starting_neovim(self):
         result = subprocess.run(
             [
                 sys.executable,
                 str(ROOT / "scripts" / "performance.py"),
-                "--generate-only",
+                "--list-inputs",
                 "--sizes",
-                "1",
+                "100",
                 "--private-dir",
                 str(self.private_dir),
             ],
@@ -220,8 +227,10 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        corpus = self.private_dir / "corpus"
-        self.assertEqual(len(list(corpus.glob("*.md"))), 6)
+        inputs = json.loads(result.stdout)
+        self.assertEqual(len(inputs), 6)
+        self.assertEqual(inputs[0]["name"], "list-100.md")
+        self.assertFalse(self.private_dir.exists())
         self.assertFalse(self.calls_file.exists())
 
     def test_cli_replacement_replaces_stage_instead_of_appending_duplicate(self):
@@ -243,22 +252,20 @@ class CliTests(unittest.TestCase):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         benchmarks = json.loads((self.public_dir / "performance.json").read_text())["stages"]["baseline"]["benchmarks"]
-        self.assertFalse(benchmarks["list/1"]["environment"]["settings"]["indent"]["enabled"])
-        self.assertTrue(benchmarks["section/1"]["environment"]["settings"]["indent"]["enabled"])
+        self.assertFalse(benchmarks["list/100"]["environment"]["settings"]["indent"]["enabled"])
+        self.assertTrue(benchmarks["section/100"]["environment"]["settings"]["indent"]["enabled"])
 
     def test_cli_rejects_incomparable_corpus_between_stages(self):
         self.assertEqual(self.invoke().returncode, 0)
-        changed = self.invoke(stage="step1", extra=("--sizes", "2"))
+        changed = self.invoke(stage="step1", extra=("--sizes", "1000"))
         self.assertNotEqual(changed.returncode, 0)
         self.assertIn("corpus", changed.stderr.lower())
 
-    def test_personal_input_cannot_alias_generated_or_output_files(self):
+    def test_personal_input_cannot_alias_output_files(self):
         targets = (
-            ("private", "corpus/list-1.md"),
             ("public", "PERFORMANCE.md"),
             ("private", "PERSONAL.md"),
             ("private", "personal.json.tmp"),
-            ("public", "corpus/mixed-1000.md"),
         )
         for directory, name in targets:
             with self.subTest(target=name), tempfile.TemporaryDirectory() as temporary:
@@ -271,6 +278,23 @@ class CliTests(unittest.TestCase):
                 result = self.invoke(personal=target, extra=("--output-dir", str(public), "--private-dir", str(private)))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(before, target.read_bytes())
+
+    def test_output_directories_cannot_overlap_the_static_fixtures(self):
+        for option in ("--output-dir", "--private-dir"):
+            with self.subTest(option=option):
+                result = self.invoke(extra=(option, str(ROOT / "benches" / "fixtures")))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("fixtures", result.stderr.lower())
+        self.assertFalse(self.calls_file.exists())
+
+    def test_public_and_private_output_directories_must_be_disjoint(self):
+        outer = self.root / "overlap"
+        for public, private in ((outer, outer / "private"), (outer / "public", outer)):
+            with self.subTest(public=public, private=private):
+                result = self.invoke(extra=("--output-dir", str(public), "--private-dir", str(private)))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(outer.exists())
+        self.assertFalse(self.calls_file.exists())
 
     def test_cli_rejects_a_different_host_before_comparing_stages(self):
         self.assertEqual(self.invoke().returncode, 0)
